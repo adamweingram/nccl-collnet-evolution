@@ -1145,7 +1145,8 @@ ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnec
     }
 
     if (offset == 0) {
-      return ncclInProgress;
+      // INFO(NCCL_ALL, "[DEBUG] [DEBUG] A [DEBUG [DEBUG]");  // TODO: DEBUG REMOVE
+      return ncclInProgress;  // NOTE: In-progress because no data has been transferred yet!
     // If we've returned a partial response, block to receive the rest of it
     } else if (offset < sizeof(recvOpId)) {
       while (offset < sizeof(recvOpId))
@@ -1194,6 +1195,7 @@ ncclResult_t ncclProxyCallBlocking(struct ncclComm* comm, struct ncclProxyConnec
 
   do {
     res = ncclPollProxyResponse(comm, proxyConn, respBuff, opId);
+    // INFO(NCCL_PROXY, "[DEBUG] ncclProxyCallBlocking: inProgress");
   } while (res == ncclInProgress);
 
 exit:
@@ -1505,6 +1507,10 @@ void* ncclProxyService(void* _args) {
             closeConn = 1;
           } else if (proxyMatchOpType(type)) {
             res = proxyServiceInitOp(type, peers+s, &connectionPool, proxyState, &asyncOpCount);
+
+            if (res != ncclSuccess && res != ncclInProgress) {
+              WARN("[DEBUG] [Service Thread] `proxyServiceInitOp` failed somehow: %d", res);
+            }
           } else {
             WARN("[Service thread] Unknown command %d from localRank %d", type, peer->tpLocalRank);
             closeConn = 1;

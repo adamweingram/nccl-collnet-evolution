@@ -108,7 +108,9 @@
   ncclResult_t RES = call; \
   if (RES != ncclSuccess && RES != ncclInProgress) { \
     /* Print the back trace*/ \
-    if (ncclDebugNoWarn == 0) INFO(NCCL_ALL,"%s:%d -> %d", __FILE__, __LINE__, RES);    \
+    if (ncclDebugNoWarn == 0) { \
+      INFO(NCCL_ALL,"%s:%d -> %d", __FILE__, __LINE__, RES); \
+    } \
     return RES; \
   } \
 } while (0);

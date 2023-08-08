@@ -13,7 +13,24 @@
 #include <stdint.h>
 #include <time.h>
 #include <sched.h>
+#include <execinfo.h>
 #include <new>
+
+/**
+ * @brief Print a stack trace to stdout.
+ * 
+ * Specifically, the names of the functions will be printed.
+*/
+inline void print_stack(void) {
+    constexpr int MAX_SIZE = 1024;
+    void *array[MAX_SIZE];
+    size_t size = backtrace(array, MAX_SIZE);
+    char **func_name_strings = backtrace_symbols(array, size);
+    for (size_t i = 0; i < size; i++) {
+        fprintf(stdout, "[BT] %s\n", func_name_strings[i]);
+    }
+    free(func_name_strings);
+}
 
 int ncclCudaCompCap();
 

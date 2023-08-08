@@ -333,6 +333,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
 
   comm->collNetSupport = 0;
+  INFO(NCCL_ALL, "CollNet: CollNet support set to %d at start of init", comm->collNetSupport);
+
   memset(comm->collNetSupportMatrix, 0, sizeof(comm->collNetSupportMatrix));
 
   ncclMemoryPoolConstruct(&comm->memPool_ncclKernelPlan);
@@ -742,6 +744,7 @@ exit:
 fail:
   ncclTransportCollNetFree(comm);
   comm->collNetSupport = 0;
+  INFO(NCCL_INIT, "CollNet: CollNet setup failed somewhere (see: `collNetTrySetup()`), disabling CollNet.");
   goto exit;
 }
 
@@ -864,8 +867,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       INFO(NCCL_ALL, "NCCL_COLLNET_ENABLE set by environment to %s.", collNetEnable);
       if (strcmp(collNetEnable, "1") == 0) {
         comm->collNetSupport = 1;
+        INFO(NCCL_ALL, "CollNet: CollNet set to enabled from environment variable.");
+      } else {
+        INFO(NCCL_INIT, "CollNet: Explicitly disabled via `NCCL_COLLNET_ENABLE` env variable");
       }
+    } else {
+      INFO(NCCL_INIT, "CollNet: Did not find `NCCL_COLLNET_ENABLE` in environment");
     }
+  } else {
+    WARN("CollNet: `collNetSupport(comm)` returned 0! Therefore: never loaded `comm->ncclCollNet` properly!");
   }
 
   // Determine local Nvls support
@@ -893,9 +903,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   collNetGraph.collNet = 1;
   collNetGraph.minChannels = collNetGraph.maxChannels = ringGraph.nChannels;
   if (comm->collNetSupport) {
+    INFO(NCCL_INIT, "CollNet: Found CollNet support; will attempt to run topo compute/print");
     NCCLCHECKGOTO(ncclTopoCompute(comm->topo, &collNetGraph), ret, fail);
     NCCLCHECKGOTO(ncclTopoPrintGraph(comm->topo, &collNetGraph), ret, fail);
+    INFO(NCCL_INIT, "CollNet: Successfully ran topo compute/print");
   } else {
+    INFO(NCCL_INIT, "CollNet: Found CollNet support = %d; setting nChannels for CollNet to 0", comm->collNetSupport);
     collNetGraph.nChannels = 0;
   }
 
@@ -1000,8 +1013,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       graphs[a]->typeIntra = std::max(allGather3Data[i].graphInfo[a].typeIntra, graphs[a]->typeIntra);
       graphs[a]->typeInter = std::max(allGather3Data[i].graphInfo[a].typeInter, graphs[a]->typeInter);
     }
-    if (graphs[NCCL_ALGO_COLLNET_CHAIN]->nChannels == 0) comm->collNetSupport = 0;
-    if (graphs[NCCL_ALGO_NVLS]->nChannels == 0) comm->nvlsSupport = 0;
+    if (graphs[NCCL_ALGO_COLLNET_CHAIN]->nChannels == 0) {
+      // WARN("[WARNING] [HACK] [HACK] [HACK] WOULD HAVE DISABLED COLLNET BUT DIDN'T FOR DEBUG! `comm->collNetSupport == %d` here!", comm->collNetSupport);
+      comm->collNetSupport = 0;
+      INFO(NCCL_INIT|NCCL_NET, "CollNet: CollNet Chain channels found to be 0, disabling CollNet");
+    }
+    if (graphs[NCCL_ALGO_NVLS]->nChannels == 0) {
+      INFO(NCCL_INIT|NCCL_NET, "NVLS: NVLS channels found to be 0, disabling NVLS");
+      comm->nvlsSupport = 0;
+    }
   }
 
   comm->nChannels = treeGraph.nChannels = ringGraph.nChannels = std::min(treeGraph.nChannels, ringGraph.nChannels);
@@ -1020,7 +1040,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
     for (int n=0; n<comm->nNodes; n++) {
       if (comm->nodeRanks[n].localRanks > NCCL_MAX_DIRECT_ARITY+1) {
-        WARN("CollNet currently only supports up to %d GPUs per node, disabling CollNet", NCCL_MAX_DIRECT_ARITY+1);
+        WARN("CollNet: CollNet currently only supports up to %d GPUs per node, disabling CollNet", NCCL_MAX_DIRECT_ARITY+1);
         comm->collNetSupport = 0;
         break;
       }
@@ -1103,7 +1123,13 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   }
 
   // Check if we can setup CollNet
-  if (comm->collNetSupport > 0) collNetTrySetup(comm, parent, &collNetGraph);
+  if (comm->collNetSupport > 0) {
+    INFO(NCCL_INIT, "CollNet: Attempting to run `collNetTrySetup()`");
+    ncclResult_t res = collNetTrySetup(comm, parent, &collNetGraph);
+    INFO(NCCL_INIT, "CollNet: `collNetTrySetup()` resulted in: %d", (int)res);
+  } else {
+    INFO(NCCL_INIT, "CollNet: CollNet support found to be %d; will not run `collNetTrySetup()`", comm->collNetSupport);
+  }
 
   TRACE(NCCL_INIT, "rank %d nranks %d - CONNECTED %d RINGS AND TREES", rank, nranks, comm->nChannels);
 

@@ -412,7 +412,7 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   collNetHandle_t* netHandle = (collNetHandle_t*) respBuff;
   if (respSize != sizeof(collNetHandle_t)) return ncclInternalError;
 
-  NCCLCHECK(sharedListen(proxyState, req->netDev, req->collNet, netHandle));
+  NCCLCHECK(sharedListen(proxyState, req->netDev, req->collNet, netHandle)); // TODO: Should rank and nranks be passed here too? Can't. Not passed `collNetConnectArgs` through `respBuff`, only `setupReq`
   return ncclSuccess;
 }
 
@@ -846,3 +846,29 @@ struct ncclTransport collNetTransport = {
   { sendSetup, sendConnect, sendFree, NULL, sendProxySetup, sendProxyConnect, sendProxyFree, sendProxyProgress },
   { recvSetup, recvConnect, recvFree, NULL, recvProxySetup, recvProxyConnect, recvProxyFree, recvProxyProgress }
 };
+
+// Cannot yet use this due to a bug in GCC:
+// struct ncclTransport collNetTransport = {
+//   .name = "COL",
+//   .canConnect = canConnect,
+//   .send = { 
+//     .setup = sendSetup, 
+//     .connect = sendConnect, 
+//     .free = sendFree, 
+//     .proxySharedInit = NULL, 
+//     .proxySetup = sendProxySetup, 
+//     .proxyConnect = sendProxyConnect, 
+//     .proxyFree = sendProxyFree, 
+//     .proxyProgress = sendProxyProgress 
+//   },
+//   .recv = { 
+//     .setup = recvSetup, 
+//     .connect = recvConnect, 
+//     .free = recvFree, 
+//     .proxySharedInit = NULL, 
+//     .proxySetup = recvProxySetup, 
+//     .proxyConnect = recvProxyConnect, 
+//     .proxyFree = recvProxyFree, 
+//     .proxyProgress = recvProxyProgress 
+//   }
+// };

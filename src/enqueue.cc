@@ -1163,10 +1163,25 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info, int collNetTypeSupport, i
     info->protocol = -1;
     int nAlgos = NCCL_NUM_ALGORITHMS;
     for (int a=0; a<nAlgos; a++) {
-      if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetTypeSupport != 1) continue;
-      if (a == NCCL_ALGO_NVLS && !NCCL_NVLS_SUPPORTS(info->datatype, info->opFull.op)) continue;
-      if (a == NCCL_ALGO_NVLS && collNetTypeSupport != 1 && comm->nNodes > 1) continue;
-      if (a == NCCL_ALGO_NVLS_TREE && !NCCL_NVLS_SUPPORTS(info->datatype, info->opFull.op)) continue;
+      if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetTypeSupport != 1) {
+        INFO(NCCL_ALL, "COLLNET_DIRECT/COLLNET_CHAIN: collNetTypeSupport != 1");
+        continue;
+      }
+
+      if (a == NCCL_ALGO_NVLS && !NCCL_NVLS_SUPPORTS(info->datatype, info->opFull.op)) {
+        INFO(NCCL_ALL, "NVLS: NCCL_NVLS_SUPPORTS(info->datatype, info->opFull.op) == false");
+        continue;
+      }
+
+      if (a == NCCL_ALGO_NVLS && collNetTypeSupport != 1 && comm->nNodes > 1) {
+        INFO(NCCL_ALL, "NVLS: collNetTypeSupport != 1 AND comm->nNodes > 1");
+        continue;
+      }
+
+      if (a == NCCL_ALGO_NVLS_TREE && !NCCL_NVLS_SUPPORTS(info->datatype, info->opFull.op)) {
+        INFO(NCCL_ALL, "NVLS_TREE: NCCL_NVLS_SUPPORTS(info->datatype, info->opFull.op) == false");
+        continue;
+      }
 
       for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
         float time;
@@ -1175,11 +1190,17 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info, int collNetTypeSupport, i
           info->algorithm = a;
           info->protocol = p;
           minTime = time;
+        } else {
+          INFO(NCCL_ALL, "Protocol %d was not accepted for algo %d (time = %f)", p, a, time);
         }
+      }
+
+      if (info->protocol == -1) {
+        WARN("No protocol is available for algorithm %d", a);
       }
     }
     if (info->algorithm == -1 || info->protocol == -1) {
-      WARN("Error : no algorithm/protocol available");
+      WARN("Error : no algorithm/protocol available!");
       return ncclInternalError;
     }
     //if (comm->rank == 0) INFO(NCCL_TUNING, "%ld Bytes -> Algo %d proto %d time %f", info->nBytes, info->algorithm, info->protocol, minTime);

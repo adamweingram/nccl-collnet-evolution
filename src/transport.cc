@@ -73,6 +73,16 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
   struct ncclConnect** recvData = (ncclConnect**) malloc(sizeof(ncclConnect*) * comm->nRanks); // Points to entries inside data for given recv connection within a channel
   struct ncclConnect** sendData = (ncclConnect**) malloc(sizeof(ncclConnect*) * comm->nRanks); // Points to entries inside data for given send connection within a channel
 
+  auto indempSendsConnected = new bool [comm->nRanks][MAXCHANNELS];
+  auto indempRecvsConnected = new bool [comm->nRanks][MAXCHANNELS];
+  for (int i = 0; i < comm->nRanks; i++) {
+    for (int j = 0; j < MAXCHANNELS; j++) {
+      indempSendsConnected[i][j] = false;
+      indempRecvsConnected[i][j] = false;
+    }
+  }
+
+
   NCCLCHECKGOTO(ncclStrongStreamAcquireUncaptured(&comm->sharedRes->hostStream), ret, fail);
   // First time initialization
   for (int i=1; i<comm->nRanks; i++) {
@@ -129,6 +139,7 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
   // Loop until all channels with all ranks have been connected
   bool allChannelsConnected;
   allChannelsConnected = false;
+  INFO(NCCL_ALL, "[DEBUG] Will attempt to connect all channels");
   while (!allChannelsConnected) {
     allChannelsConnected = true;
     for (int i=1; i<comm->nRanks; i++) {
@@ -154,10 +165,18 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
                 CUDACHECKGOTO(cudaMemcpyAsync(&addr->send[connIndex], &conn->conn, sizeof(struct ncclConnInfo), cudaMemcpyHostToDevice, comm->sharedRes->hostStream.cudaStream), ret, fail);
               } else if (ret == ncclInProgress) {
                 allChannelsConnected = false;
+                // INFO(NCCL_ALL, "[DEBUG] Send setup IP (channel = %d)", c);
               }
             }
           }
           TIME_STOP(3);
+
+          // TODO: Prints 
+          if (!indempSendsConnected[i][c] && allChannelsConnected) {
+            INFO(NCCL_ALL, "[DEBUG] All `send` appear to be connected (recvPeer = %d, sendPeer = %d, channel = %d/%d (ALL channels ARE shown))",
+                recvPeer, sendPeer, c, MAXCHANNELS - 1);
+            indempSendsConnected[i][c] = true;
+          }
 
           // Start with recv channels
           TIME_START(4);
@@ -174,13 +193,22 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
                 CUDACHECKGOTO(cudaMemcpyAsync(&addr->recv[connIndex], &conn->conn, sizeof(struct ncclConnInfo), cudaMemcpyHostToDevice, comm->sharedRes->hostStream.cudaStream), ret, fail);
               } else if (ret == ncclInProgress) {
                 allChannelsConnected = false;
+                // INFO(NCCL_ALL, "[DEBUG] Recv setup IP (channel = %d)", c);
               }
             }
           }
           TIME_STOP(4);
+
+          // TODO: Prints 
+          if (!indempRecvsConnected[i][c] && allChannelsConnected) {
+            INFO(NCCL_ALL, "[DEBUG] All `recv` appear to be connected (recvPeer = %d, sendPeer = %d, channel = %d/%d (ALL channels ARE shown))",
+                recvPeer, sendPeer, c, MAXCHANNELS - 1);
+            indempRecvsConnected[i][c] = true;
+          }
       }
     }
   }
+  INFO(NCCL_ALL, "[DEBUG] Connected all channels!");
 
   // Clear all connect masks and free each connectInfo array
   for (int i=1; i<comm->nRanks; i++) {

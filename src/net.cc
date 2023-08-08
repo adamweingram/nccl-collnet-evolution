@@ -166,6 +166,8 @@ enum ncclNetState ncclNetStates[3] = { ncclNetStateInit, ncclNetStateInit, ncclN
 enum ncclNetState ncclCollNetStates[3] = { ncclNetStateInit, ncclNetStateInit, ncclNetStateInit };
 
 ncclResult_t ncclNetPluginInit() {
+
+  // Get/calc the plugin lib name
   char ncclNetPluginName[128];
   const char* envPluginName = getenv("NCCL_NET_PLUGIN");
   if (envPluginName && strlen(envPluginName)) {
@@ -174,6 +176,8 @@ ncclResult_t ncclNetPluginInit() {
   } else {
     sprintf(ncclNetPluginName, "libnccl-net.so");
   }
+
+  // Open the plugin lib
   void* netPluginLib = dlopen(ncclNetPluginName, RTLD_NOW | RTLD_LOCAL);
   if (netPluginLib == nullptr) {
     INFO(NCCL_INIT|NCCL_NET, "NET/Plugin : Plugin load (%s) returned %d : %s", ncclNetPluginName, errno, dlerror());
@@ -181,6 +185,7 @@ ncclResult_t ncclNetPluginInit() {
     return ncclSuccess;
   }
 
+  // Attempt to load the NCCL Net plugin
   ncclNets[0] = (ncclNet_v6_t*)dlsym(netPluginLib, "ncclNetPlugin_v6");
   if (ncclNets[0] == nullptr) {
     INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Failed to find ncclNetPlugin_v6 symbol.");
@@ -205,9 +210,11 @@ ncclResult_t ncclNetPluginInit() {
       ncclNet_v5_as_v6.name = ncclNet_v5->name;
       INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded net plugin %s (v5)", ncclNets[0]->name);
     }
+  } else {
+    INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded net plugin %s (v6)", ncclNets[0]->name);
   }
 
-  // Check for CollNet
+  // Check for and attempt to load NCCL CollNet plugin
   ncclCollNets[0] = (ncclCollNet_v6_t*)dlsym(netPluginLib, "ncclCollNetPlugin_v6");
   if (ncclCollNets[0] == nullptr) {
     INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Failed to find ncclCollNetPlugin_v6 symbol.");
@@ -228,19 +235,45 @@ ncclResult_t ncclNetPluginInit() {
       ncclCollNet_v5_as_v6.name = ncclCollNet_v5->name;
       INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded coll plugin %s (v5)", ncclCollNets[0]->name);
     }
+  } else {
+    INFO(NCCL_INIT|NCCL_NET, "NET/Plugin: Loaded coll plugin %s (v6)", ncclCollNets[0]->name);
   }
   return ncclSuccess;
 }
 
 static ncclResult_t netGetState(int i, enum ncclNetState* state) {
   pthread_mutex_lock(&netLock);
+
+  // If the Net hasn't been initialized yet
   if (ncclNetStates[i] == ncclNetStateInit) {
     int ndev;
-    if (ncclNets[i]->init(ncclDebugLog) != ncclSuccess) ncclNetStates[i] = ncclNetStateDisabled;
-    else if (ncclNets[i]->devices(&ndev) != ncclSuccess || ndev <= 0) ncclNetStates[i] = ncclNetStateDisabled;
-    else ncclNetStates[i] = ncclNetStateEnabled;
+
+    // Handle unsuccessful init
+    ncclResult_t res = ncclNets[i]->init(ncclDebugLog);
+    if (res != ncclSuccess) {
+      ncclNetStates[i] = ncclNetStateDisabled;
+      INFO(NCCL_NET, "Net: Call to `init()` for %s resulted in status: %d", ncclNets[i]->name, (int)res);
+      goto done;
+    }
+    
+    // Handle disabled devices
+    res = ncclNets[i]->devices(&ndev);
+    if (res != ncclSuccess || ndev <= 0) {
+      ncclNetStates[i] = ncclNetStateDisabled;
+      INFO(NCCL_NET, "Net: Call to `init()` for %s resulted in status: %d (also: dev == %d)", ncclNets[i]->name, (int)res, ndev);
+      goto done;
+    }
+    
+    // Else
+    ncclNetStates[i] = ncclNetStateEnabled;
+    goto done;
   }
+
+done:
+
+  // Set state return value
   *state = ncclNetStates[i];
+
   pthread_mutex_unlock(&netLock);
   return ncclSuccess;
 }
@@ -263,19 +296,35 @@ ncclResult_t ncclNetInit(struct ncclComm* comm) {
 
   netName = comm->config.netName;
   for (int i=0; i<3; i++) {
+    // Skip if the plugin is null
     if (ncclNets[i] == nullptr) continue;
+
+    // Skip if the plugin is disabled
     enum ncclNetState state;
     NCCLCHECK(netGetState(i, &state));
-    if (state != ncclNetStateEnabled) continue;
-    if (netName && strcasecmp(netName, ncclNets[i]->name) != 0) continue;
+    if (state != ncclNetStateEnabled) {
+      WARN("Net/CollNet: Found that Net plugin %s returned a state of: %d (< NOT `ncclNetStateEnabled`!)", ncclNets[i]->name, (int)state);
+      continue;
+    }
 
+    // Skip if ???? (TODO: Fill in)
+    if (netName && strcasecmp(netName, ncclNets[i]->name) != 0) {
+      WARN("Net/CollNet: Name mismatch (?) for Net: %s != %s", netName, ncclNets[i]->name); // TODO: Give better info
+      continue;
+    }
+
+    // Set the `ncclNet` field for the communicator
     comm->ncclNet = ncclNets[i];
+    INFO(NCCL_NET, "Net: `comm->ncclNet` has been set to: %s", comm->ncclNet->name);
     ok = true;
 
+    // Try CollNet associated with this Net
     if (ncclCollNets[i]) {
       NCCLCHECK(collNetGetState(i, &state));
       if (state == ncclNetStateEnabled) {
         comm->ncclCollNet = ncclCollNets[i];
+      } else {
+        INFO(NCCL_NET, "CollNet: Found that CollNet plugin %s returned a state of: %d (< NOT `ncclNetStateEnabled`!)", ncclCollNets[i]->name, (int)state);
       }
     }
     break;
@@ -322,6 +371,9 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
     void* mHandle = NULL;
     ncclResult_t ret;
     ncclDebugNoWarn = NCCL_NET;
+
+    // INFO(NCCL_NET, "Net/CollNet: [DEBUG] [DEBUG] [DEBUG] About to call `net->listen()`");
+    fprintf(stdout, "Net/CollNet: [DEBUG] [DEBUG] [DEBUG] About to call `net->listen()`\n");
     NCCLCHECKGOTO(comm->ncclNet->listen(dev, &handle, &lComm), ret, cleanup1);
 
     bool connected;

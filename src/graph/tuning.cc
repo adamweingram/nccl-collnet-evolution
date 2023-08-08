@@ -257,24 +257,37 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
     NCCLCHECK(parseList(algoStr, ncclAlgoStr, NCCL_NUM_ALGORITHMS, algoEnable));
   }
 
-  if (comm->nNodes == 1) algoEnable[NCCL_ALGO_NVLS_TREE] = 0;
+  if (comm->nNodes == 1) {
+    INFO(NCCL_ALL, "[DEBUG] `algoEnable[%d]` set to %d", NCCL_ALGO_NVLS_TREE, 0);
+    algoEnable[NCCL_ALGO_NVLS_TREE] = 0;
+  }
 
   // Disable CollNet if it is not supported
   if (comm->collNetSupport == 0) {
     algoEnable[NCCL_ALGO_COLLNET_DIRECT] = 0;
+    INFO(NCCL_ALL, "[DEBUG] `algoEnable[%d]` (NCCL_ALGO_COLLNET_DIRECT) set to %d", 
+        NCCL_ALGO_COLLNET_DIRECT, algoEnable[NCCL_ALGO_COLLNET_DIRECT]);
     algoEnable[NCCL_ALGO_COLLNET_CHAIN] = 0;
+    INFO(NCCL_ALL, "[DEBUG] `algoEnable[%d]` (NCCL_ALGO_COLLNET_CHAIN) set to %d", 
+        NCCL_ALGO_COLLNET_CHAIN, algoEnable[NCCL_ALGO_COLLNET_CHAIN]);
     if (comm->nNodes > 1) algoEnable[NCCL_ALGO_NVLS] = 0;
     // If user has hard set NCCL_ALGO=COLLNET, ignore it
     if (algoEnable[NCCL_ALGO_RING] == 0 && algoEnable[NCCL_ALGO_TREE] == 0 &&
         algoEnable[NCCL_ALGO_NVLS] == 0 && algoEnable[NCCL_ALGO_NVLS_TREE] == 0) {
       algoEnable[NCCL_ALGO_RING] = algoEnable[NCCL_ALGO_TREE] = 1;
+      INFO(NCCL_ALL, "[DEBUG] `algoEnable[%d]`/`algoEnable[%d]` (NCCL_ALGO_RING/NCCL_ALGO_TREE) set to %d", 
+          NCCL_ALGO_RING, NCCL_ALGO_TREE, algoEnable[NCCL_ALGO_TREE]);
       if (comm->rank == 0) WARN("CollNet is not supported or fails to initialize, ignoring NCCL_ALGO=COLLNET");
     }
   } else {
     // Disable CollNet+Direct if not on an NVSwitch system
     int nvsCount = 0;
     NCCLCHECK(ncclTopoGetNvsCount(comm->topo, &nvsCount));
-    if (nvsCount == 0) algoEnable[NCCL_ALGO_COLLNET_DIRECT] = 0;
+    if (nvsCount == 0) {
+      algoEnable[NCCL_ALGO_COLLNET_DIRECT] = 0;
+      INFO(NCCL_ALL, "[DEBUG] `algoEnable[%d]` (NCCL_ALGO_COLLNET_DIRECT) set to %d", 
+          NCCL_ALGO_COLLNET_DIRECT, algoEnable[NCCL_ALGO_COLLNET_DIRECT]);
+    }
   }
 
   for (int c=0; c<NCCL_NUM_FUNCTIONS; c++) for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
@@ -291,11 +304,20 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
       case 90: pEnable &= !(CUDART_VERSION == 11080 && c == ncclFuncAllReduce && a == NCCL_ALGO_RING && comm->nRanks == 2); break;
       default: pEnable &= 0; break;
       }
+      INFO(NCCL_ALL, "[DEBUG] Found `pEnable == 2 && p == NCCL_PROTO_LL128`. After processing, `pEnable` modified to: %d", 
+          pEnable);
     }
-    if (pEnable == 0) comm->bandwidths[c][a][p] = 0;
+    if (pEnable == 0) {
+      INFO(NCCL_ALL, "[DEBUG] [A] Setting `bandwidths[%d][%d][%d] = 0` because `pEnable == 0`!", c, a, p);
+      comm->bandwidths[c][a][p] = 0;
+    }
     // Never disable ring for non-allreduce operations. That allows to run real apps with NCCL_ALGO=TREE.
     if (a == NCCL_ALGO_RING && c != ncclFuncAllReduce) continue;
-    if (algoEnable[a] == 0) comm->bandwidths[c][a][p] = 0;
+    if (algoEnable[a] == 0) {
+      INFO(NCCL_ALL, "[DEBUG] [B] Setting `bandwidths[%d][%d][%d] = 0` because `algoEnable[%d] == 0`!", 
+          c, a, p, a);
+      comm->bandwidths[c][a][p] = 0;
+    }
   }
 
   if (comm->rank == 0) {
@@ -382,7 +404,9 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclInfo* info, int algorithm, int proto
   float bw = info->comm->bandwidths[info->coll][algorithm][protocol];
   float lat = info->comm->latencies[info->coll][algorithm][protocol];
   if (bw == 0) {
-    *time = -1.0; return ncclSuccess;
+    INFO(NCCL_ALL, "`ncclTopoGetAlgoTime` got `bw == 0`; setting `*time = -1.0`");
+    *time = -1.0; 
+    return ncclSuccess;
   }
   int logSize = log2i(info->nBytes>>6);
   if (algorithm == NCCL_ALGO_TREE && logSize < 23) bw *= treeCorrectionFactor[protocol][logSize];
@@ -394,5 +418,6 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclInfo* info, int algorithm, int proto
   // Tree pipelining saves latency in aggregation cases
   int latCount = algorithm == NCCL_ALGO_RING ? numPipeOps : DIVUP(numPipeOps, NCCL_MAX_WORK_ELEMENTS);
   *time = lat * latCount + (info->nBytes) / (1000 * bw);
+  INFO(NCCL_ALL, "`ncclTopoGetAlgoTime` reported: %f", *time);
   return ncclSuccess;
 }

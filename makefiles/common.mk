@@ -55,7 +55,6 @@ else
   NVCC_GENCODE ?= $(CUDA8_GENCODE) $(CUDA8_PTX)
 endif
 $(info NVCC_GENCODE is ${NVCC_GENCODE})
-
 CXXFLAGS   := -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR) -fPIC -fvisibility=hidden \
               -Wall -Wno-unused-function -Wno-sign-compare -std=c++11 -Wvla \
               -I $(CUDA_INC) \
@@ -66,6 +65,11 @@ CXXFLAGS   := -DCUDA_MAJOR=$(CUDA_MAJOR) -DCUDA_MINOR=$(CUDA_MINOR) -fPIC -fvisi
 NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -std=c++11 --expt-extended-lambda -Xptxas -maxrregcount=96 -Xfatbin -compress-all
 # Use addprefix so that we can specify more than one path
 NVLDFLAGS  := -L${CUDA_LIB} -lcudart -lrt
+
+# Specialized compiler additions
+COMPILER_PREFIX ?= 
+CXXFLAGS += $(COMPILER_PREFIX)
+NVCUFLAGS += -Xcompiler $(COMPILER_PREFIX)
 
 ########## GCOV ##########
 GCOV ?= 0 # disable by default.
