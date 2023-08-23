@@ -13,6 +13,8 @@
 typedef char collNetHandle_t[NCCL_NET_HANDLE_MAXSIZE];
 
 // Translation to external API
+
+/* Setup and Initialization */
 static const char* collNetName(struct ncclComm* comm) { return comm->ncclCollNet->name; }
 static ncclResult_t collNetDevices(struct ncclComm* comm, int* ndev) { NCCLCHECK(comm->ncclCollNet->devices(ndev)); return ncclSuccess; }
 static ncclResult_t collNetGetProperties(struct ncclComm* comm, int dev, ncclNetProperties_t* props) { NCCLCHECK(comm->ncclCollNet->getProperties(dev, props)); return ncclSuccess; }
@@ -23,13 +25,32 @@ static ncclResult_t collNetRegMr(struct ncclComm* comm, void* collComm, void* da
 /* DMA-BUF support */
 static ncclResult_t collNetRegMrDmaBuf(struct ncclComm* comm, void* collComm, void* data, int size, int type, uint64_t offset, int fd, void** mhandle) { NCCLCHECK(comm->ncclCollNet->regMrDmaBuf(collComm, data, size, type, offset, fd, mhandle)); return ncclSuccess; }
 static ncclResult_t collNetDeregMr(struct ncclComm* comm, void* collComm, void* mhandle) { NCCLCHECK(comm->ncclCollNet->deregMr(collComm, mhandle)); return ncclSuccess; }
-static ncclResult_t collNetIallreduce(struct ncclComm* comm, void* collComm, void* sendData, void* recvData, int count, ncclDataType_t dataType, ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle,  void** request) {
-  NCCLCHECK(comm->ncclCollNet->iallreduce(collComm, sendData, recvData, count, dataType, redOp, sendMhandle, recvMhandle, request)); return ncclSuccess; }
+
+/* Collectives */
+static ncclResult_t collNetIbroadcast(struct ncclComm* comm, void* collComm, void* sendData, void* recvData, int root, int count, ncclDataType_t dataType, void* sendMhandle, void* recvMhandle, void** request) {
+  NCCLCHECK(comm->ncclCollNet->broadcast(collComm, sendData, recvData, root, count, dataType, sendMhandle, recvMhandle, request)); 
+  return ncclSuccess; 
+}
+
+static ncclResult_t collNetIallreduce(struct ncclComm* comm, void* collComm, void* sendData, void* recvData, int count, ncclDataType_t dataType, ncclRedOp_t redOp, void* sendMhandle, void* recvMhandle, void** request) {
+  NCCLCHECK(comm->ncclCollNet->iallreduce(collComm, sendData, recvData, count, dataType, redOp, sendMhandle, recvMhandle, request)); 
+  return ncclSuccess; 
+}
+
+static ncclResult_t collNetIallgather(struct ncclComm* comm, void* collComm, void* sendData, void* recvData, int count, ncclDataType_t dataType, void* sendMhandle, void* recvMhandle, void** request) {
+  NCCLCHECK(comm->ncclCollNet->iallgather(collComm, sendData, recvData, count, dataType, sendMhandle, recvMhandle, request)); 
+  return ncclSuccess; 
+}
+
+/* Collective Support */
 static ncclResult_t collNetIflush(struct ncclComm* comm, void* collComm, void* data, int size, void* mhandle, void** request) { NCCLCHECK(comm->ncclCollNet->iflush(collComm, data, size, mhandle, request)); return ncclSuccess; }
 static ncclResult_t collNetTest(struct ncclComm* comm, void* request, int* done, int* size) { NCCLCHECK(comm->ncclCollNet->test(request, done, size)); return ncclSuccess; }
+
+/* Teardown */
 static ncclResult_t collNetCloseColl(struct ncclComm* comm, void* collComm) { NCCLCHECK(comm->ncclCollNet->closeColl(collComm)); return ncclSuccess; }
 static ncclResult_t collNetCloseListen(struct ncclComm* comm, void* listenComm) { NCCLCHECK(comm->ncclCollNet->closeListen(listenComm)); return ncclSuccess; }
 
+/* Other */
 static int collNetSupport(struct ncclComm* comm) { return comm->ncclCollNet != nullptr ? 1 : 0; }
 
 #endif

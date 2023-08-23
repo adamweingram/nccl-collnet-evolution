@@ -163,7 +163,9 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
       nNodes;
 
     for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
-      if (coll == ncclFuncBroadcast && a != NCCL_ALGO_RING) continue;
+
+      // TODO: Modify for CollNet-enabled collectives. Make sure it doesn't mess up NVLS.
+      if (coll == ncclFuncBroadcast && (a != NCCL_ALGO_RING && a != NCCL_ALGO_COLLNET_CHAIN && a != NCCL_ALGO_COLLNET_DIRECT)) continue;
       if (coll == ncclFuncReduce && a != NCCL_ALGO_RING) continue;
       if (coll == ncclFuncReduceScatter && a != NCCL_ALGO_RING) continue;
       if (coll == ncclFuncAllGather && a != NCCL_ALGO_RING) continue;
@@ -294,6 +296,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
     }
     if (pEnable == 0) comm->bandwidths[c][a][p] = 0;
     // Never disable ring for non-allreduce operations. That allows to run real apps with NCCL_ALGO=TREE.
+    // TODO: Check if this needs to be disabled for specific collectives if using CollNet
     if (a == NCCL_ALGO_RING && c != ncclFuncAllReduce) continue;
     if (algoEnable[a] == 0) comm->bandwidths[c][a][p] = 0;
   }
@@ -381,18 +384,30 @@ static float treeCorrectionFactor[NCCL_NUM_PROTOCOLS][23] = {
 ncclResult_t ncclTopoGetAlgoTime(struct ncclInfo* info, int algorithm, int protocol, int numPipeOps, float* time) {
   float bw = info->comm->bandwidths[info->coll][algorithm][protocol];
   float lat = info->comm->latencies[info->coll][algorithm][protocol];
+  
   if (bw == 0) {
-    *time = -1.0; return ncclSuccess;
+    *time = -1.0; 
+    return ncclSuccess;
   }
+
   int logSize = log2i(info->nBytes>>6);
-  if (algorithm == NCCL_ALGO_TREE && logSize < 23) bw *= treeCorrectionFactor[protocol][logSize];
-  if (info->nChannels != 0) bw = bw / info->comm->nChannels * info->nChannels;
+  if (algorithm == NCCL_ALGO_TREE && logSize < 23) {
+    bw *= treeCorrectionFactor[protocol][logSize];
+  }
+
+  if (info->nChannels != 0) {
+    bw = bw / info->comm->nChannels * info->nChannels;
+  }
+
   if (algorithm == NCCL_ALGO_RING && protocol == NCCL_PROTO_SIMPLE && info->comm->nNodes > 1
       && info->coll == ncclFuncAllReduce && info->nBytes/(info->comm->nChannels*info->comm->nRanks) >= 64) {
     lat *= info->comm->minCompCap < 80 ? 1.9 : 1.4; // Plateau effect of ring
   }
+
   // Tree pipelining saves latency in aggregation cases
   int latCount = algorithm == NCCL_ALGO_RING ? numPipeOps : DIVUP(numPipeOps, NCCL_MAX_WORK_ELEMENTS);
+  
   *time = lat * latCount + (info->nBytes) / (1000 * bw);
+  
   return ncclSuccess;
 }

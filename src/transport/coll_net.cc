@@ -612,6 +612,8 @@ static ncclResult_t recvProxyFree(struct ncclProxyConnection* connection, struct
   (s % COLLNET_GROUP_NSUBS == COLLNET_GROUP_NSUBS-1 || s == args->nsubs-1)
 
 static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct ncclProxyArgs* args) {
+  INFO(NCCL_ALL, "[DEBUG] [DEBUG] [DEBUG] [DEBUG] COLLNET IN ACTIVE USE! (`sendProxyProgress` in coll_net.cc:~615)");
+
   if (args->state == ncclProxyOpReady) {
     for (int s=0; s<args->nsubs; s++) {
       struct ncclProxySubArgs* sub = args->subs+s;
@@ -680,6 +682,8 @@ static ncclResult_t sendProxyProgress(struct ncclProxyState* proxyState, struct 
           int count = totalSize / ncclTypeSize((ncclDataType_t)args->dtype);
           reqFifo[group][buffSlot].size = args->sharedSize[sharedBuffSlot];
           char* sendAddress = (char*)args->sharedBuff[sharedBuffSlot] + group*COLLNET_GROUP_NSUBS*args->sharedSize[sharedBuffSlot];
+
+          // TODO: Check which collective we're supposed to be doing rather than assuming always `allreduce`
           NCCLCHECK(proxyState->ncclCollNet->iallreduce(resources->collNetComm, sendAddress, (void*)(reqFifo[group][buffSlot].recvBuff), count, (ncclDataType_t)args->dtype, (ncclRedOp_t)args->redOp, sendMhandle, recvMhandle, sub->requests+buffSlot));
           if (sub->requests[buffSlot] == NULL) continue;
 
